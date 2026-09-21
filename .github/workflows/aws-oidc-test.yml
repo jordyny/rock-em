@@ -22,6 +22,15 @@ jobs:
       - name: Verify AWS identity
         run: aws sts get-caller-identity
 
+      - name: Create test artifact
+        run: |
+          echo "hello from GitHub Actions" > test-artifact.txt
+
+      - name: Upload test artifact
+        run: |
+          aws s3 cp test-artifact.txt \
+            s3://rockem-deployments-739147175766/releases/test-artifact.txt
+
       - name: Send test command
         id: ssm
         run: |
