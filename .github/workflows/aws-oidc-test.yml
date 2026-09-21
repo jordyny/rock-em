@@ -26,31 +26,35 @@ jobs:
         run: |
           echo "hello from GitHub Actions" > test-artifact.txt
 
-      - name: Upload test artifact
+      - name: Upload test artifact to S3
         run: |
           aws s3 cp test-artifact.txt \
             s3://rockem-deployments-739147175766/releases/test-artifact.txt
 
-      - name: Send test command
+      - name: Send S3 download test to EC2
         id: ssm
         run: |
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "i-0a1fa506d610e83ed" \
             --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["whoami","hostname","pwd"]' \
+            --parameters 'commands=[
+              "aws s3 cp s3://rockem-deployments-739147175766/releases/test-artifact.txt /tmp/test-artifact.txt",
+              "cat /tmp/test-artifact.txt",
+              "rm /tmp/test-artifact.txt"
+            ]' \
             --query "Command.CommandId" \
             --output text)
 
           echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
           echo "Sent SSM command: $COMMAND_ID"
 
-      - name: Wait for command
+      - name: Wait for SSM command
         run: |
           aws ssm wait command-executed \
             --command-id "${{ steps.ssm.outputs.command_id }}" \
             --instance-id "i-0a1fa506d610e83ed"
 
-      - name: Show command result
+      - name: Show SSM command result
         run: |
           aws ssm get-command-invocation \
             --command-id "${{ steps.ssm.outputs.command_id }}" \
