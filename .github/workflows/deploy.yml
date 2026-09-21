@@ -1,0 +1,101 @@
+name: Deploy Production
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    environment: production
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Type check
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Package frontend
+        run: |
+          tar -C frontend/dist -czf "rockem-${GITHUB_SHA}.tar.gz" .
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::739147175766:role/rockem-github-deploy
+          aws-region: us-east-1
+
+      - name: Upload release artifact
+        run: |
+          aws s3 cp \
+            "rockem-${GITHUB_SHA}.tar.gz" \
+            "s3://rockem-deployments-739147175766/releases/${GITHUB_SHA}.tar.gz"
+
+      - name: Deploy release
+        id: deploy
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "i-0a1fa506d610e83ed" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "commands=[\"/usr/local/bin/rockem-deploy ${GITHUB_SHA}\"]" \
+            --query "Command.CommandId" \
+            --output text)
+
+          echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
+          echo "SSM command: $COMMAND_ID"
+
+      - name: Wait for deployment
+        id: wait
+        run: |
+          aws ssm wait command-executed \
+            --command-id "${{ steps.deploy.outputs.command_id }}" \
+            --instance-id "i-0a1fa506d610e83ed"
+
+      - name: Show deployment output
+        if: always() && steps.deploy.outputs.command_id != ''
+        run: |
+          aws ssm get-command-invocation \
+            --command-id "${{ steps.deploy.outputs.command_id }}" \
+            --instance-id "i-0a1fa506d610e83ed"
+
+      - name: Verify production
+        run: |
+          curl \
+            --fail \
+            --show-error \
+            --silent \
+            --retry 3 \
+            --retry-delay 2 \
+            https://rockem.xyz/ > /dev/null
+
+          echo "Production health check passed."
