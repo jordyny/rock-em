@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rock-em/rock-em/backend/internal/problems"
 )
 
 type healthResponse struct {
@@ -52,6 +53,10 @@ func main() {
 			log.Printf("failed to encode response: %v", err)
 		}
 	})
+
+	problemHandler := problems.NewHandler(db)
+
+	mux.HandleFunc("GET /api/problems", problemHandler.List)
 
 	server := &http.Server{
 		Addr:    "127.0.0.1:8080",
