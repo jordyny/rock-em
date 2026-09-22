@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"net/http"
 	"os"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rock-em/rock-em/backend/internal/health"
 	"github.com/rock-em/rock-em/backend/internal/problems"
 )
 
@@ -39,23 +39,10 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
-		if err := db.Ping(r.Context()); err != nil {
-			http.Error(w, `{"status":"unhealthy"}`, http.StatusServiceUnavailable)
-			return
-		}
-
-		if err := json.NewEncoder(w).Encode(healthResponse{
-			Status: "ok",
-		}); err != nil {
-			log.Printf("failed to encode response: %v", err)
-		}
-	})
-
+	healthHandler := health.NewHandler(db)
 	problemHandler := problems.NewHandler(db)
 
+	mux.HandleFunc("GET /api/health", healthHandler.Check)
 	mux.HandleFunc("GET /api/problems", problemHandler.List)
 
 	server := &http.Server{
