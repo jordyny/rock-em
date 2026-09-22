@@ -1,29 +1,57 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type healthResponse struct {
 	Status string `json:"status"`
 }
 
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	if err := json.NewEncoder(w).Encode(healthResponse{
-		Status: "ok",
-	}); err != nil {
-		log.Printf("failed to encode response: %v", err)
-	}
-}
-
 func main() {
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		log.Fatal("DATABASE_URL is required")
+	}
+
+	db, err := pgxpool.New(context.Background(), databaseURL)
+	if err != nil {
+		log.Fatalf("failed to create database pool: %v", err)
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := db.Ping(ctx); err != nil {
+		log.Fatalf("failed to connect to database: %v", err)
+	}
+
+	log.Println("connected to PostgreSQL")
+
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /api/health", healthHandler)
+	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if err := db.Ping(r.Context()); err != nil {
+			http.Error(w, `{"status":"unhealthy"}`, http.StatusServiceUnavailable)
+			return
+		}
+
+		if err := json.NewEncoder(w).Encode(healthResponse{
+			Status: "ok",
+		}); err != nil {
+			log.Printf("failed to encode response: %v", err)
+		}
+	})
 
 	server := &http.Server{
 		Addr:    "127.0.0.1:8080",
