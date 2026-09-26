@@ -2,9 +2,11 @@ package problems
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -13,6 +15,14 @@ type Problem struct {
 	Slug       string `json:"slug"`
 	Title      string `json:"title"`
 	Difficulty string `json:"difficulty"`
+}
+
+type ProblemDetail struct {
+	ID          int64  `json:"id"`
+	Slug        string `json:"slug"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Difficulty  string `json:"difficulty"`
 }
 
 type Handler struct {
@@ -68,5 +78,52 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewEncoder(w).Encode(problems); err != nil {
 		log.Printf("failed to encode problems: %v", err)
+	}
+}
+
+func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+
+	var problem ProblemDetail
+
+	err := h.db.QueryRow(
+		r.Context(),
+		`
+			SELECT id, slug, title, description, difficulty
+			FROM problems
+			WHERE slug = $1
+		`,
+		slug,
+	).Scan(
+		&problem.ID,
+		&problem.Slug,
+		&problem.Title,
+		&problem.Description,
+		&problem.Difficulty,
+	)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.Error(
+			w,
+			`{"error":"problem not found"}`,
+			http.StatusNotFound,
+		)
+		return
+	}
+
+	if err != nil {
+		log.Printf("failed to query problem %q: %v", slug, err)
+		http.Error(
+			w,
+			`{"error":"internal server error"}`,
+			http.StatusInternalServerError,
+		)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if err := json.NewEncoder(w).Encode(problem); err != nil {
+		log.Printf("failed to encode problem: %v", err)
 	}
 }

@@ -20,3 +20,6 @@ dist/
 # Go
 bin/
 coverage.out
+
+# Python
+__pycache__/
